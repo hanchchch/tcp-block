@@ -4,6 +4,7 @@
 #include "kmp.h"
 
 #define MAX_PATTERN_LEN 1024
+#define BLOCK_MESSAGE "BLOCKED!"
 
 #pragma pack(push, 1)
 typedef struct TcpPacketHdr {

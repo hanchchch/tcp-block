@@ -6,4 +6,4 @@ tcp-block: main.o header/scheme/ip.o header/scheme/mac.o header/ethhdr.o header/
 	$(LINK.cc) $^ $(LOADLIBES) $(LDLIBS) -o $@
 
 clean:
-	rm -f $(TARGET) *.o
+	rm -f tcp-block *.o header/*.o header/scheme/*.o
