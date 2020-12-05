@@ -68,17 +68,18 @@ void send_packet(pcap_t* handle, tcp_packet_hdr_t* packet, int size) {
 uint32_t wrapsum(uint16_t* buf, int size) {
     uint32_t cksum = 0;
 
-    for(int i = 0; i < size/sizeof(uint16_t); i++) {  
+    int hsize = size/sizeof(uint16_t) + size%sizeof(uint16_t);
+    for(int i = 0; i < hsize; i++) {  
         cksum += ntohs(buf[i]);
         cksum = (cksum & 0xffff) + (cksum >> 16);
     }
     return cksum;
 }
 
-uint16_t tcp_checksum(tcp_packet_hdr_t *tcphdr) {
-    int size = tcphdr->tcp_.off_ * BIT32_IN_BYTE;
+uint16_t tcp_checksum(tcp_packet_hdr_t *tcphdr, int size) {
     uint16_t* pseudo_hdr = (uint16_t*)(new PseudoHdr(tcphdr->ip_.sip_, tcphdr->ip_.dip_, size));
     uint32_t cksum = 0;
+    tcphdr->tcp_.sum_ = 0;
 
     cksum += wrapsum(pseudo_hdr, sizeof(PseudoHdr));
     cksum += wrapsum((uint16_t*)&(tcphdr->tcp_), size);
@@ -91,6 +92,7 @@ uint16_t tcp_checksum(tcp_packet_hdr_t *tcphdr) {
 uint16_t ip_checksum(tcp_packet_hdr_t *tcphdr) {
     int size = tcphdr->ip_.hl_ * BIT32_IN_BYTE;
     uint32_t cksum = 0;
+    tcphdr->ip_.sum_ = 0;
 
     cksum += wrapsum((uint16_t*)&(tcphdr->ip_), size);
     cksum = (cksum & 0xffff) + (cksum >> 16);
@@ -104,20 +106,33 @@ void block(pcap_t* handle, tcp_packet_hdr_t* pk_f, tcp_packet_hdr_t* pk_b, int s
     int data_size = size - header_size;
     int new_size = size - data_size;
 
-    (*pk_f).ip_.len_ = htons(new_size-sizeof(EthHdr));
-    (*pk_f).ip_.sum_ = 0;
-    (*pk_f).ip_.sum_ = ip_checksum(pk_f);
-    (*pk_f).tcp_.seq_ += ntohl(data_size);
-    (*pk_f).tcp_.flags_ = (TcpHdr::RST|TcpHdr::ACK);
-    (*pk_f).tcp_.sum_ = 0;
-    (*pk_f).tcp_.sum_ = tcp_checksum(pk_f);
+    pk_f->ip_.len_ = htons(new_size-sizeof(EthHdr));
+    pk_f->ip_.sum_ = ip_checksum(pk_f);
+    pk_f->tcp_.seq_ += htonl(data_size);
+    pk_f->tcp_.flags_ = (TcpHdr::RST|TcpHdr::ACK);
+    pk_f->tcp_.sum_ = tcp_checksum(pk_f, tcphdr_size);
 	send_packet(handle, pk_f, new_size);
 
-    //(*packet).tcp_.seq_ += ntohs((*packet).ip_.len_);
-    //(*packet).tcp_.flags_ = TcpHdr::FIN;
-    //strncpy(((char*)packet)+sizeof(TcpPacketHdr), BLOCK_MESSAGE, sizeof(BLOCK_MESSAGE));
+    Mac tmp_mac(pk_b->eth_.smac_);
+    pk_b->eth_.smac_ = pk_b->eth_.dmac_;
+    pk_b->eth_.dmac_ = tmp_mac;
 
-	//send_packet(handle, pk_b, sizeof(TcpPacketHdr)+sizeof(BLOCK_MESSAGE));
+    Ip tmp_ip(pk_b->ip_.sip_);
+    pk_b->ip_.sip_ = pk_b->ip_.dip_;
+    pk_b->ip_.dip_ = tmp_ip;
+    pk_b->ip_.len_ = htons(new_size-sizeof(EthHdr)+sizeof(BLOCK_MESSAGE));
+    pk_b->ip_.sum_ = ip_checksum(pk_b);
+
+    uint16_t tmp_port = pk_b->tcp_.sport_;
+    pk_b->tcp_.sport_ = pk_b->tcp_.dport_;
+    pk_b->tcp_.dport_ = tmp_port;
+    pk_b->tcp_.seq_ = pk_f->tcp_.ack_;
+    pk_b->tcp_.ack_ = htonl(ntohl(pk_f->tcp_.seq_));
+    pk_b->tcp_.flags_ = (TcpHdr::FIN|TcpHdr::ACK);
+    strncpy(((char*)pk_b)+header_size, BLOCK_MESSAGE, sizeof(BLOCK_MESSAGE));
+    pk_b->tcp_.sum_ = tcp_checksum(pk_b, tcphdr_size+sizeof(BLOCK_MESSAGE));
+
+	send_packet(handle, pk_b, new_size+sizeof(BLOCK_MESSAGE));
 }
 
 
@@ -170,7 +185,6 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        printf("%d cap\n", header->caplen);
         handle_packet(handle, packet, header->caplen);
     }
 

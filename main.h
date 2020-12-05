@@ -4,7 +4,7 @@
 #include "kmp.h"
 
 #define MAX_PATTERN_LEN 1024
-#define BLOCK_MESSAGE "BLOCKED!"
+#define BLOCK_MESSAGE "BLOCKED"
 #define ETH_IP4_HEADER_LEN 34
 #define BIT32_IN_BYTE 4
 #define MAC_ADDR_LEN 6
